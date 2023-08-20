@@ -1,13 +1,10 @@
-import json
 import os
-import sys
-from typing import Generator, Callable, Dict, List, Any
+from typing import Generator, Dict, List, Any
 
-import pytest
 import allure
+import pytest
 from playwright.sync_api import Browser, Error, Page, BrowserContext
-from pytest_playwright.pytest_playwright import artifacts_folder, _build_artifact_test_folder, \
-    VSCODE_PYTHON_EXTENSION_ID, _is_debugger_attached
+from pytest_playwright.pytest_playwright import _build_artifact_test_folder
 from slugify import slugify
 
 
