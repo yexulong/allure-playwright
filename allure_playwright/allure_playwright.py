@@ -1,10 +1,15 @@
+import operator
 import os
+from functools import reduce
+from io import BytesIO
 from typing import Generator, Dict, List, Any
 
 import allure
 import pytest
+from PIL import Image
+from pixelmatch.contrib.PIL import pixelmatch
 from playwright.sync_api import Browser, Error, Page, BrowserContext
-from pytest_playwright.pytest_playwright import _build_artifact_test_folder
+from pytest_playwright.pytest_playwright import _build_artifact_test_folder, truncate_file_name
 from slugify import slugify
 
 
@@ -60,6 +65,7 @@ def context(
         if retain_trace:
             trace_path = _build_artifact_test_folder(pytestconfig, request, "trace.zip")
             context.tracing.stop(path=trace_path)
+            allure.attach.file(trace_path, 'trace', extension='zip')
         else:
             context.tracing.stop()
 
@@ -104,6 +110,47 @@ def context(
             except Error:
                 # Silent catch empty videos.
                 pass
+
+
+def _build_snapshots_folder(request: pytest.FixtureRequest, folder_or_file_name=None, actual=False, diff=False):
+    if actual and not folder_or_file_name:
+        folder_or_file_name = f'{slugify(request.node.nodeid)}-actual.png'
+    elif diff and not folder_or_file_name:
+        folder_or_file_name = f'{slugify(request.node.nodeid)}-diff.png'
+    else:
+        folder_or_file_name = folder_or_file_name or f'{slugify(request.node.nodeid)}.png'
+    return os.path.join(
+        request.node.path.parent,
+        f'{truncate_file_name(os.path.splitext(os.path.basename(request.node.path))[0])}-snapshots',
+        f'{truncate_file_name(folder_or_file_name)}'
+    )
+
+
+def to_have_screenshot(request: pytest.FixtureRequest, page: Page,
+                       folder_or_file_name=None, update=False, maxDiffPixelRatio=0, maxDiffPixels=None, threshold=0.2, **kwargs):
+    raw_snapshot_folder = _build_snapshots_folder(request, folder_or_file_name)
+    if not os.path.exists(raw_snapshot_folder):
+        page.screenshot(path=raw_snapshot_folder, **kwargs)
+        raise Exception(f"Error: A snapshot doesn't exist at {raw_snapshot_folder}, writing actual.")
+    if update:
+        page.screenshot(path=raw_snapshot_folder, **kwargs)
+        return True
+    raw_snapshot = Image.open(raw_snapshot_folder)
+    actual_snapshot = Image.open(BytesIO(page.screenshot(**kwargs)))
+    diff_snapshot = Image.new("RGBA", raw_snapshot.size)
+
+    mismatch = pixelmatch(raw_snapshot, actual_snapshot, diff_snapshot, includeAA=True, threshold=threshold)
+    if (maxDiffPixels and mismatch > maxDiffPixels) or (mismatch / reduce(operator.mul, raw_snapshot.size) > maxDiffPixelRatio):
+        actual_snapshot_folder = _build_snapshots_folder(request, folder_or_file_name, actual=True)
+        actual_snapshot.save(actual_snapshot_folder)
+        diff_snapshot_folder = _build_snapshots_folder(request, folder_or_file_name, diff=True)
+        diff_snapshot.save(diff_snapshot_folder)
+        allure.attach.file(raw_snapshot_folder, name='Expected', attachment_type=allure.attachment_type.PNG)
+        allure.attach.file(actual_snapshot_folder, name='Actual', attachment_type=allure.attachment_type.PNG)
+        allure.attach.file(diff_snapshot_folder, name='Diff', attachment_type=allure.attachment_type.PNG)
+        raise Exception(f"Screenshot comparison failed。\nExpected:{raw_snapshot_folder}\nReceived:{actual_snapshot_folder}\nDiff:{diff_snapshot_folder}")
+    else:
+        return True
 
 
 def pytest_addoption(parser: Any) -> None:

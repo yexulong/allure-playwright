@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="pytest_playwright_allure",
-    version="0.0.1",
+    version="0.0.2",
     author="yexulong",
     author_email="yexulong@foxmail.com",
     description="A pytest plugin for Playwright to attach allure report",
